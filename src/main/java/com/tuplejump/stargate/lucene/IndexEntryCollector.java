@@ -41,7 +41,9 @@ import java.util.*;
  * An IndexEntry reads from DocValues to construct the row key, primary key and timestamp info.
  */
 public class IndexEntryCollector extends SimpleCollector {
-
+    private static String PK_FIELD = LuceneUtils.PK_NAME_DOC_VAL;
+    private static SortField PK_SORT = new SortField(PK_FIELD, org.apache.lucene.search.SortField.Type.STRING, false);
+    private static SortField PK_SORT_REV = new SortField(PK_FIELD, org.apache.lucene.search.SortField.Type.STRING, true);
     public final FieldValueHitQueue<IndexEntry> hitQueue;
     LeafFieldComparator[] comparators;
     int docBase;
@@ -63,8 +65,8 @@ public class IndexEntryCollector extends SimpleCollector {
     TreeMultimap<DecoratedKey, IndexEntry> indexEntryTreeMultiMap;
     TableMapper tableMapper;
     public final boolean isSorted;
-
-
+    String afterKey;
+    boolean reverseClustering;
     boolean canByPassRowFetch;
 
     public boolean canByPassRowFetch() {
@@ -75,13 +77,16 @@ public class IndexEntryCollector extends SimpleCollector {
         return totalHits;
     }
 
-    public IndexEntryCollector(TableMapper tableMapper, Search search, Options options, int maxResults) throws IOException {
+    public IndexEntryCollector(String afterKey, boolean reverseClustering, TableMapper tableMapper, Search search, Options options, int maxResults) throws IOException {
+        this.afterKey = afterKey;
         Function function = search.function();
         this.tableMapper = tableMapper;
         this.options = options;
+        this.reverseClustering = reverseClustering;
         org.apache.lucene.search.SortField[] sortFields = search.usesSorting() ? search.sort(options) : null;
         if (sortFields == null) {
-            hitQueue = FieldValueHitQueue.create(new org.apache.lucene.search.SortField[]{org.apache.lucene.search.SortField.FIELD_SCORE}, maxResults);
+            SortField[] clusteringKeySort = new SortField[]{reverseClustering ? PK_SORT_REV : PK_SORT};
+            hitQueue = FieldValueHitQueue.create(clusteringKeySort, maxResults);
             isSorted = false;
         } else {
             hitQueue = FieldValueHitQueue.create(sortFields, maxResults);
@@ -161,9 +166,11 @@ public class IndexEntryCollector extends SimpleCollector {
             while ((entry = hitQueue.pop()) != null) {
                 indexEntries.add(entry);
             }
+
         }
         return indexEntries;
     }
+
 
     public TreeMultimap<DecoratedKey, IndexEntry> docsByRowKey() {
         if (indexEntries != null) throw new IllegalStateException("Hit queue already traversed");
@@ -209,9 +216,54 @@ public class IndexEntryCollector extends SimpleCollector {
         this.scorer = scorer;
     }
 
+    protected final int compareTop(int doc) throws IOException {
+        int cmp = reverseMul[0] * comparators[0].compareTop(doc);
+        if (cmp != 0) {
+            return cmp;
+        }
+        for (int i = 1; i < comparators.length; ++i) {
+            cmp = reverseMul[i] * comparators[i].compareTop(doc);
+            if (cmp != 0) {
+                return cmp;
+            }
+        }
+        return 0;
+    }
+
+    protected final int compareBottom(int doc) throws IOException {
+        int cmp = reverseMul[0] * comparators[0].compareBottom(doc);
+        if (cmp != 0) {
+            return cmp;
+        }
+        for (int i = 1; i < comparators.length; ++i) {
+            cmp = reverseMul[i] * comparators[i].compareBottom(doc);
+            if (cmp != 0) {
+                return cmp;
+            }
+        }
+        return 0;
+    }
+
+    protected final void copy(int slot, int doc) throws IOException {
+        for (LeafFieldComparator comparator : comparators) {
+            comparator.copy(slot, doc);
+        }
+    }
+
+
     @Override
     public void collect(int doc) throws IOException {
         ++totalHits;
+
+        //compare current doc PKName with afterKey
+        //if less return
+        String pkName = LuceneUtils.primaryKeyName(pkNames, doc);
+        if (afterKey != null) {
+            if (reverseClustering && pkName.compareTo(afterKey) >= 0)
+                return;//already seen in last page
+            else if (pkName.compareTo(afterKey) <= 0)
+                return;//already seen in last page
+        }
         if (queueFull) {
             // Fastmatch: return if this hit is not competitive
             for (int i = 0; ; i++) {
@@ -267,6 +319,7 @@ public class IndexEntryCollector extends SimpleCollector {
         bottom = getIndexEntry(slot, doc, score);
         hitQueue.add(bottom);
     }
+
 
     final void add(int slot, int doc, float score) throws IOException {
         IndexEntry entry = getIndexEntry(slot, doc, score);

@@ -182,7 +182,7 @@ public class TableMapper {
         return primaryKeyType.builder().add(rowKey).add(clusteringKey.toByteBuffer()).build();
     }
 
-    public CellName extractClusteringKey(CellName cellName) {
+    public CellName extractClusteringKey(Composite cellName) {
         int clusterColumns = table.metadata.clusteringColumns().size();
         Object[] components = new ByteBuffer[clusterColumns + 1];
         for (int i = 0; i < clusterColumns; i++) {
@@ -199,6 +199,7 @@ public class TableMapper {
 
     public final Map<CellName, ColumnFamily> getRows(ColumnFamily columnFamily) {
         Map<CellName, ColumnFamily> columnFamilies = new LinkedHashMap<>();
+        if (columnFamily == null) return columnFamilies;
         for (Cell cell : columnFamily) {
             CellName cellName = cell.name();
             CellName clusteringKey = extractClusteringKey(cellName);

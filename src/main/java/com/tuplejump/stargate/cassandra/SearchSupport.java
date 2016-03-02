@@ -45,11 +45,14 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Set;
 
 /**
  * User: satya
- * <p>
+ * <p/>
  * A searcher which can be used with a SGIndex
  * Includes features to make lucene queries etc.
  */
@@ -122,8 +125,6 @@ public class SearchSupport extends SecondaryIndexSearcher {
         final Range<Token> filterRange = new Range<>(keyRange.left.getToken(), keyRange.right.getToken());
         final boolean isSingleToken = filterRange.left.equals(filterRange.right);
         final boolean isFullRange = isSingleToken && baseCfs.partitioner.getMinimumToken().equals(filterRange.left);
-        final boolean shouldSaveToCache = isPagingQuery(filter.dataRange);
-        final boolean shouldRetrieveFromCache = shouldSaveToCache && !isFirstPage((DataRange.Paging) filter.dataRange);
 
         SearcherCallback<List<Row>> sc = new SearcherCallback<List<Row>>() {
             @Override
@@ -142,21 +143,16 @@ public class SearchSupport extends SecondaryIndexSearcher {
                     }
                     function.init(options);
                     IndexEntryCollector collector = null;
-                    if (shouldRetrieveFromCache) {
-                        collector = currentIndex.collectorMap.get(queryString);
+                    if (isPagingQuery(filter.dataRange) && filter.dataRange.keyRange().left instanceof DecoratedKey) {
+                        DataRange.Paging paging = (DataRange.Paging) filter.dataRange;
+                        DecoratedKey dk = (DecoratedKey) filter.dataRange.keyRange().left;
+                        String afterPK = getPageStart(dk, paging);
+                        boolean reverse = filter.dataRange.columnFilter(dk.getKey()).isReversed();
+                        collector = new IndexEntryCollector(afterPK, reverse, tableMapper, search, options, resultsLimit);
+                    } else {
+                        collector = new IndexEntryCollector(null, false, tableMapper, search, options, resultsLimit);
                     }
-                    if (collector == null) {
-                        collector = new IndexEntryCollector(tableMapper, search, options, resultsLimit);
-                        searcher.search(query, collector);
-                        if (shouldSaveToCache) {
-                            currentIndex.collectorMap.put(queryString, collector);
-                        }
-                        if (logger.isInfoEnabled()) {
-                            logger.info("Adding collector to cache");
-                        }
-                    } else if (logger.isInfoEnabled()){
-                        logger.info("Found collector in cache");
-                    }
+                    searcher.search(query, collector);
                     timer2.endLogTime("Lucene search for [" + collector.getTotalHits() + "] results ");
                     if (SearchSupport.logger.isDebugEnabled()) {
                         SearchSupport.logger.debug(String.format("Search results [%s]", collector.getTotalHits()));
@@ -206,7 +202,7 @@ public class SearchSupport extends SecondaryIndexSearcher {
 
     protected String getPartitionKeyString(ExtendedFilter mainFilter) {
         AbstractBounds<RowPosition> keyRange = mainFilter.dataRange.keyRange();
-        if (keyRange != null && keyRange.left != null && keyRange.left instanceof DecoratedKey) {
+        if (keyRange != null && keyRange.left != null && keyRange.left instanceof DecoratedKey && keyRange.right instanceof DecoratedKey) {
             DecoratedKey left = (DecoratedKey) keyRange.left;
             DecoratedKey right = (DecoratedKey) keyRange.right;
             if (left.equals(right)) {
@@ -218,6 +214,29 @@ public class SearchSupport extends SecondaryIndexSearcher {
 
     private boolean isPagingQuery(DataRange dataRange) {
         return (dataRange instanceof DataRange.Paging);
+    }
+
+
+    private String getPageStart(DecoratedKey dk, DataRange.Paging pageRange) {
+        try {
+            Composite start = (Composite) getPrivateProperty(pageRange, "firstPartitionColumnStart");
+            Composite end = (Composite) getPrivateProperty(pageRange, "lastPartitionColumnFinish");
+            if (start != null) {
+                CellName clusteringKey = tableMapper.extractClusteringKey(start);
+                CellName endKey = tableMapper.extractClusteringKey(end);
+                if (!clusteringKey.isSameCQL3RowAs(tableMapper.clusteringCType, endKey)) {
+                    ByteBuffer primaryKeyBuff = tableMapper.primaryKey(dk.getKey(), clusteringKey);
+                    String primaryKey = tableMapper.primaryKeyType.getString(primaryKeyBuff);
+                    return primaryKey;
+                }
+
+            }
+        } catch (NoSuchFieldException e) {
+            //do nothing;
+        } catch (IllegalAccessException e) {
+            //do nothing
+        }
+        return null;
     }
 
     private boolean isFirstPage(DataRange.Paging pageRange) {
