@@ -165,6 +165,10 @@ public class LuceneUtils {
 
     public static ByteBuffer byteBufferDocValue(BinaryDocValues docValues, int docId) throws IOException {
         BytesRef ref = BytesRef.deepCopyOf(docValues.get(docId));
+        return fromBytesRef(ref);
+    }
+
+    public static ByteBuffer fromBytesRef(BytesRef ref) {
         return ByteBuffer.wrap(ref.bytes, ref.offset, ref.length);
     }
 

@@ -146,7 +146,7 @@ public class SearchSupport extends SecondaryIndexSearcher {
                     if (isPagingQuery(filter.dataRange) && filter.dataRange.keyRange().left instanceof DecoratedKey) {
                         DataRange.Paging paging = (DataRange.Paging) filter.dataRange;
                         DecoratedKey dk = (DecoratedKey) filter.dataRange.keyRange().left;
-                        String afterPK = getPageStart(dk, paging);
+                        ByteBuffer afterPK = getPageStart(dk, paging);
                         boolean reverse = filter.dataRange.columnFilter(dk.getKey()).isReversed();
                         collector = new IndexEntryCollector(afterPK, reverse, tableMapper, search, options, resultsLimit);
                     } else {
@@ -217,7 +217,7 @@ public class SearchSupport extends SecondaryIndexSearcher {
     }
 
 
-    private String getPageStart(DecoratedKey dk, DataRange.Paging pageRange) {
+    private ByteBuffer getPageStart(DecoratedKey dk, DataRange.Paging pageRange) {
         try {
             Composite start = (Composite) getPrivateProperty(pageRange, "firstPartitionColumnStart");
             Composite end = (Composite) getPrivateProperty(pageRange, "lastPartitionColumnFinish");
@@ -226,8 +226,7 @@ public class SearchSupport extends SecondaryIndexSearcher {
                 CellName endKey = tableMapper.extractClusteringKey(end);
                 if (!clusteringKey.isSameCQL3RowAs(tableMapper.clusteringCType, endKey)) {
                     ByteBuffer primaryKeyBuff = tableMapper.primaryKey(dk.getKey(), clusteringKey);
-                    String primaryKey = tableMapper.primaryKeyType.getString(primaryKeyBuff);
-                    return primaryKey;
+                    return primaryKeyBuff;
                 }
 
             }
