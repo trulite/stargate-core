@@ -41,9 +41,6 @@ import java.util.*;
  * An IndexEntry reads from DocValues to construct the row key, primary key and timestamp info.
  */
 public class IndexEntryCollector extends SimpleCollector {
-    private static String PK_FIELD = LuceneUtils.PK_NAME_DOC_VAL;
-    private static SortField PK_SORT = new SortField(PK_FIELD, org.apache.lucene.search.SortField.Type.STRING, false);
-    private static SortField PK_SORT_REV = new SortField(PK_FIELD, org.apache.lucene.search.SortField.Type.STRING, true);
     public final FieldValueHitQueue<IndexEntry> hitQueue;
     LeafFieldComparator[] comparators;
     int docBase;
@@ -65,7 +62,7 @@ public class IndexEntryCollector extends SimpleCollector {
     TreeMultimap<DecoratedKey, IndexEntry> indexEntryTreeMultiMap;
     TableMapper tableMapper;
     public final boolean isSorted;
-    String afterKey;
+    ByteBuffer afterKey;
     boolean reverseClustering;
     boolean canByPassRowFetch;
 
@@ -77,7 +74,7 @@ public class IndexEntryCollector extends SimpleCollector {
         return totalHits;
     }
 
-    public IndexEntryCollector(String afterKey, boolean reverseClustering, TableMapper tableMapper, Search search, Options options, int maxResults) throws IOException {
+    public IndexEntryCollector(ByteBuffer afterKey, boolean reverseClustering, TableMapper tableMapper, Search search, Options options, int maxResults) throws IOException {
         this.afterKey = afterKey;
         Function function = search.function();
         this.tableMapper = tableMapper;
@@ -85,7 +82,7 @@ public class IndexEntryCollector extends SimpleCollector {
         this.reverseClustering = reverseClustering;
         org.apache.lucene.search.SortField[] sortFields = search.usesSorting() ? search.sort(options) : null;
         if (sortFields == null) {
-            SortField[] clusteringKeySort = new SortField[]{reverseClustering ? PK_SORT_REV : PK_SORT};
+            SortField[] clusteringKeySort = new SortField[]{reverseClustering ? tableMapper.pkSortFieldReverse : tableMapper.pkSortField};
             hitQueue = FieldValueHitQueue.create(clusteringKeySort, maxResults);
             isSorted = false;
         } else {
@@ -253,17 +250,17 @@ public class IndexEntryCollector extends SimpleCollector {
 
     @Override
     public void collect(int doc) throws IOException {
-        ++totalHits;
-
         //compare current doc PKName with afterKey
         //if less return
-        String pkName = LuceneUtils.primaryKeyName(pkNames, doc);
         if (afterKey != null) {
-            if (reverseClustering && pkName.compareTo(afterKey) >= 0)
-                return;//already seen in last page
-            else if (pkName.compareTo(afterKey) <= 0)
-                return;//already seen in last page
+            int currentPKCompareToAfterPK = tableMapper.primaryKeyType.compare(LuceneUtils.fromBytesRef(primaryKeys.get(doc)), afterKey);
+            if (reverseClustering)
+                if (currentPKCompareToAfterPK >= 0) {
+                    return;//already seen in last page
+                } else if (currentPKCompareToAfterPK <= 0)
+                    return;//already seen in last page
         }
+        ++totalHits;
         if (queueFull) {
             // Fastmatch: return if this hit is not competitive
             for (int i = 0; ; i++) {

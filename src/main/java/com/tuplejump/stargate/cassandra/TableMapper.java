@@ -17,6 +17,7 @@
 package com.tuplejump.stargate.cassandra;
 
 import com.tuplejump.stargate.Fields;
+import com.tuplejump.stargate.lucene.LuceneUtils;
 import com.tuplejump.stargate.lucene.query.function.Tuple;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
@@ -24,7 +25,12 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.composites.*;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.lucene.search.FieldComparator;
+import org.apache.lucene.search.FieldComparatorSource;
+import org.apache.lucene.search.SortField;
+import org.apache.lucene.util.BytesRef;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -35,6 +41,7 @@ import java.util.Map;
  * User: satya
  */
 public class TableMapper {
+    private static String PK_FIELD = LuceneUtils.PK_BYTES;
 
     public final AbstractType primaryKeyAbstractType;
     public final AbstractType clusteringKeyType;
@@ -46,6 +53,9 @@ public class TableMapper {
     public final ColumnDefinition primaryColumnDefinition;
     public final CFMetaData cfMetaData;
 
+    public final SortField pkSortField = getPkSort(false);
+    public final SortField pkSortFieldReverse = getPkSort(true);
+
     public TableMapper(ColumnFamilyStore table, boolean isMetaColumn, ColumnDefinition primaryColumnDefinition) {
         this.table = table;
         this.cfMetaData = table.metadata;
@@ -56,6 +66,27 @@ public class TableMapper {
         this.defaultPartitionKey = defaultPartitionKey();
         this.isMetaColumn = isMetaColumn;
         this.primaryColumnDefinition = primaryColumnDefinition;
+
+    }
+
+    private SortField getPkSort(final boolean reverseClustering) {
+        final TableMapper tableMapper = this;
+        FieldComparatorSource pkComparatorSource = new FieldComparatorSource() {
+            @Override
+            public FieldComparator<?> newComparator(String fieldname, int numHits, int sortPos, boolean reversed) throws IOException {
+                return new FieldComparator.TermValComparator(numHits, fieldname, false) {
+                    @Override
+                    public int compareValues(BytesRef val1, BytesRef val2) {
+                        if (val1 == null || val2 == null) {
+                            return super.compareValues(val1, val2);
+                        } else {
+                            return tableMapper.primaryKeyType.compare(LuceneUtils.fromBytesRef(val1), LuceneUtils.fromBytesRef(val2));
+                        }
+                    }
+                };
+            }
+        };
+        return new SortField(PK_FIELD, pkComparatorSource, reverseClustering);
     }
 
     public String primaryColumnName() {
