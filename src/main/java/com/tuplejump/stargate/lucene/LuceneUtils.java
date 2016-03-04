@@ -34,6 +34,9 @@ import java.nio.file.Files;
 import java.text.NumberFormat;
 import java.util.Locale;
 
+import static org.apache.lucene.search.BooleanClause.Occur.FILTER;
+import static org.apache.lucene.search.BooleanClause.Occur.MUST;
+
 /**
  * User: satya
  */
@@ -44,6 +47,7 @@ public class LuceneUtils {
 
     public static final String RK_BYTES = "_rk_bytes";
     public static final String PK_BYTES = "_pk_bytes";
+    public static final String TOKEN_LONG = "_token_val";
     public static final String CF_TS_INDEXED = "_cf_ts";
     private static final Logger logger = LoggerFactory.getLogger(LuceneUtils.class);
     //  NumberFormat instances are not thread safe
@@ -180,6 +184,9 @@ public class LuceneUtils {
         return new SortedDocValuesField(RK_BYTES, bytesRef);
     }
 
+    public static Field tokenBytesDocValue(final Token token) {
+        return new NumericDocValuesField(TOKEN_LONG, ((Number) token.getTokenValue()).longValue());
+    }
 
     public static Field textField(String name, String value) {
         return new TextField(name, value, Field.Store.NO);
@@ -272,6 +279,23 @@ public class LuceneUtils {
             finalQuery.add(new TermQuery(LuceneUtils.rowkeyTerm(partitionKeyString)), BooleanClause.Occur.MUST);
             return finalQuery.build();
         }
+    }
+
+    public static Query buildQuery(Query query, Query filter, Query range) {
+        if (query == null && filter == null && range == null) {
+            return new MatchAllDocsQuery();
+        }
+        BooleanQuery.Builder builder = new BooleanQuery.Builder();
+        if (range != null) {
+            builder.add(range, FILTER);
+        }
+        if (filter != null) {
+            builder.add(filter, FILTER);
+        }
+        if (query != null) {
+            builder.add(query, MUST);
+        }
+        return new CachingWrapperQuery(builder.build());
     }
 
     public static class NumericConfigTL extends NumericConfig {

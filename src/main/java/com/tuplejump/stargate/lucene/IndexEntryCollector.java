@@ -70,8 +70,12 @@ public class IndexEntryCollector implements Collector {
         return canByPassRowFetch;
     }
 
-    public int getTotalHits() {
+    public int getCollectedHits() {
         return collectedHits;
+    }
+
+    public int getTotalHits() {
+        return totalHits;
     }
 
     public IndexEntryCollector(FieldDoc afterDoc, boolean reverseClustering, TableMapper tableMapper, Search search, Options options, int maxResults) throws IOException {
@@ -83,18 +87,22 @@ public class IndexEntryCollector implements Collector {
         if (sortFields == null) {
             hitQueue = FieldValueHitQueue.create(search.primaryKeySort(tableMapper, reverseClustering), maxResults);
             isSorted = false;
+
+            FieldComparator<?>[] comparators = hitQueue.getComparators();
+            if (afterDoc != null) {
+                // Tell all comparators their top value:
+                for (int i = 0; i < comparators.length; i++) {
+                    @SuppressWarnings("unchecked")
+                    FieldComparator<Object> comparator = (FieldComparator<Object>) comparators[i];
+                    comparator.setTopValue(afterDoc.fields[i]);
+                }
+            } else {
+                ((FieldComparator<Long>)comparators[0]).setTopValue(reverseClustering ? Long.MAX_VALUE : Long.MIN_VALUE);
+            }
+
         } else {
             hitQueue = FieldValueHitQueue.create(sortFields, maxResults);
             isSorted = true;
-        }
-        if (afterDoc != null) {
-            FieldComparator<?>[] comparators = hitQueue.getComparators();
-            // Tell all comparators their top value:
-            for (int i = 0; i < comparators.length; i++) {
-                @SuppressWarnings("unchecked")
-                FieldComparator<Object> comparator = (FieldComparator<Object>) comparators[i];
-                comparator.setTopValue(afterDoc.fields[i]);
-            }
         }
 
 

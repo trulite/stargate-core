@@ -130,7 +130,7 @@ public class SearchSupport extends SecondaryIndexSearcher {
                 } else {
                     Utils.SimpleTimer timer2 = Utils.getStartedTimer(SearchSupport.logger);
                     Function function = search.function();
-                    Query query = LuceneUtils.getQueryUpdatedWithPKCondition(search.query(options), getPartitionKeyString(filter));
+                    Query query = LuceneUtils.buildQuery(search.query(options), search.filter(options), dataRange(filter.dataRange));;
                     int resultsLimit = filter.currentLimit();
                     if (resultsLimit == 0) {
                         resultsLimit = 1;
@@ -144,9 +144,10 @@ public class SearchSupport extends SecondaryIndexSearcher {
                     FieldDoc afterDoc = getAfterDoc(searcher, reverseClustering, filter, search);
                     IndexEntryCollector collector = new IndexEntryCollector(afterDoc, reverseClustering, tableMapper, search, options, resultsLimit);
                     searcher.search(query, collector);
-                    timer2.endLogTime("Lucene search for [" + collector.getTotalHits() + "] results ");
+                    timer2.endLogTime("Lucene search for collectedHits=[" + collector.getCollectedHits() + "] & totalHits=["
+                    + collector.getTotalHits() + "] results");
                     if (SearchSupport.logger.isDebugEnabled()) {
-                        SearchSupport.logger.debug(String.format("Search results [%s]", collector.getTotalHits()));
+                        SearchSupport.logger.debug(String.format("Search results [%s]", collector.getCollectedHits()));
                     }
                     ResultMapper resultMapper = new ResultMapper(tableMapper, searchSupport, filter, collector, function.shouldTryScoring() && search.isShowScore(), reverseClustering);
                     Utils.SimpleTimer timer3 = Utils.getStartedTimer(SearchSupport.logger);
@@ -212,6 +213,59 @@ public class SearchSupport extends SecondaryIndexSearcher {
             }
         }
         return null;
+    }
+
+
+    private Query dataRange(DataRange dataRange) {
+        return null;
+//        RowPosition startPosition = dataRange.startKey();
+//        RowPosition stopPosition = dataRange.stopKey();
+//        Token startToken = startPosition.getToken();
+//        Token stopToken = stopPosition.getToken();
+//        boolean isSameToken = startToken.compareTo(stopToken) == 0 && !tokenMapper.isMinimum(startToken);
+//        BooleanClause.Occur occur = isSameToken ? FILTER : SHOULD;
+//        boolean includeStart = tokenMapper.includeStart(startPosition);
+//        boolean includeStop = tokenMapper.includeStop(stopPosition);
+//
+//        SliceQueryFilter sqf;
+//        if (startPosition instanceof DecoratedKey) {
+//            sqf = (SliceQueryFilter) dataRange.columnFilter(((DecoratedKey) startPosition).getKey());
+//        } else {
+//            sqf = (SliceQueryFilter) dataRange.columnFilter(ByteBufferUtil.EMPTY_BYTE_BUFFER);
+//        }
+//        Composite startName = sqf.start();
+//        Composite stopName = sqf.finish();
+//
+//        BooleanQuery.Builder builder = new BooleanQuery.Builder();
+//
+//        if (!startName.isEmpty()) {
+//            BooleanQuery.Builder b = new BooleanQuery.Builder();
+//            b.add(tokenMapper.query(startToken), FILTER);
+//            b.add(clusteringKeyMapper.query(startName, null), FILTER);
+//            builder.add(b.build(), occur);
+//            includeStart = false;
+//        }
+//
+//        if (!stopName.isEmpty()) {
+//            BooleanQuery.Builder b = new BooleanQuery.Builder();
+//            b.add(tokenMapper.query(stopToken), FILTER);
+//            b.add(clusteringKeyMapper.query(null, stopName), FILTER);
+//            builder.add(b.build(), occur);
+//            includeStop = false;
+//        }
+//
+//        BooleanQuery query = builder.build();
+//        if (!isSameToken) {
+//            Query rangeQuery = tokenMapper.query(startToken, stopToken, includeStart, includeStop);
+//            if (rangeQuery != null) {
+//                builder.add(rangeQuery, SHOULD);
+//                query = builder.build();
+//            }
+//        } else if (query.clauses().isEmpty()) {
+//            return tokenMapper.query(startToken);
+//        }
+//
+//        return query.clauses().isEmpty() ? null : query;
     }
 
     protected String getPartitionKeyString(ExtendedFilter mainFilter) {

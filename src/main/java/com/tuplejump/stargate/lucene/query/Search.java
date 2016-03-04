@@ -99,15 +99,7 @@ public class Search {
         return showScore;
     }
 
-    /**
-     * Returns the Lucene's {@link Query} representation of this search. This {@link Query} include both the querying
-     * and filtering {@link Condition}s. If none of them is set, then a {@link MatchAllDocsQuery} is returned.
-     *
-     * @param schema the schema
-     * @return The Lucene's {@link Query} representation of this search.
-     * @throws Exception when the query cannot be constructed
-     */
-    public Query query(Options schema) throws Exception {
+    public Query oldQuery(Options schema) throws Exception {
         Query query = queryCondition == null ? null : queryCondition.query(schema);
         Query filter = filterCondition == null ? null : filterCondition.filter(schema);
         if (query == null && filter == null) {
@@ -129,12 +121,30 @@ public class Search {
         }
     }
 
+    public Query filter(Options schema) throws Exception {
+        return filterCondition == null ? null : filterCondition.filter(schema);
+    }
+
+    public Query query(Options schema) throws Exception {
+        if (queryCondition == null) {
+            return null;
+        }
+        Query query = queryCondition.query(schema);
+        if (queryCondition.getBoost() != Condition.DEFAULT_BOOST) {
+            query = new BoostQuery(query, queryCondition.getBoost());
+        }
+        return query;
+    }
+
     public org.apache.lucene.search.SortField[] sort(Options schema) {
         return sort == null ? null : sort.sort(schema);
     }
 
     public org.apache.lucene.search.SortField[] primaryKeySort(TableMapper tableMapper, boolean reverseClustering) {
-        return new SortField[]{reverseClustering ? tableMapper.pkSortFieldReverse : tableMapper.pkSortField};
+        return new SortField[]{
+                tableMapper.tokenSortField,
+                reverseClustering ? tableMapper.pkSortFieldReverse : tableMapper.pkSortField
+        };
     }
 
     /**
